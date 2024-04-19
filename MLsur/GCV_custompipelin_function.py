@@ -820,6 +820,72 @@ def minimum_nb_samples_with_value(counts_df, smallestGroupSize=3, thr=10, drop__
     return entropy_value
 
 
+# %%
+# =============================================================================
+# Création d'un class pour le prediction de Cox sur les donnée de mutations sommées
+# =============================================================================
+
+
+class Norm_sum_Predictor(BaseEstimator):
+    def __init__(
+        self,
+    ):
+
+        self.cox_model = CoxPHFitter()
+        self.norm_sum = None
+
+    def fit(self, X, y=None):
+        # Assuming y is a DataFrame with 'pfs' and 'pfs_event' columns
+        # and X is a DataFrame with the features
+        df_surv = pd.DataFrame(y, index=X.index, dtype=float)
+        duration_col = df_surv.columns[1]
+        event_col = df_surv.columns[0]
+        self.df_cox = cox_on_all_itterrows(
+            X, df_surv, duration_col=duration_col, event_col=event_col
+        )
+        df_surv["norm_sum"] = self.calculate_norm_sum(X, self.df_cox)
+
+        return self
+
+    def transform(self, X):
+        # If you need to transform the data, you can implement it here
+        # For example, you might want to apply the same preprocessing steps
+        # that were applied during the training phase
+        return X
+
+    def predict(self, X):
+        # Assuming X is a DataFrame with the same features as during training
+        norm_sum = self.calculate_norm_sum(X, self.df_cox)
+        return self.cox_model.predict_partial_hazard(norm_sum)
+
+    def score(self, X, y):
+        # Assuming y is a DataFrame with 'pfs' and 'pfs_event' columns
+        # and X is a DataFrame with the features
+        check_is_fitted(self, ["df_cox"])
+        df_surv_score = pd.DataFrame(y, index=X.index, dtype=float)
+        duration_col = df_surv_score.columns[1]
+        event_col = df_surv_score.columns[0]
+
+        df_surv_score["norm_sum"] = self.calculate_norm_sum(X, self.df_cox)
+
+        self.cox_model.fit(
+            df_surv_score, duration_col=duration_col, event_col=event_col
+        )
+
+        pvalue = self.cox_model.summary["p"].iloc[0]
+        return pvalue
+
+    def calculate_norm_sum(self, df_table, df_cox):
+        df = df_table.copy()
+        df = df[df_cox.index]
+        risk_index = (df_cox["exp(coef)"] > 1).index
+        df[risk_index] = np.abs(1 - df[risk_index])
+        df = df.mean(axis=1)
+
+        return df
+
+
+# %%
 # =============================================================================
 # Création fonction qui somme les mutation pour chaque patient en inversant 0 et 1 si HR > 1
 # =============================================================================
